@@ -80,6 +80,7 @@ ABC (ADB Basic Controller) 是一款轻量级的 Android 设备命令行控制�
 |              | ARM64 (Apple Silicon) | `abc_vx.x.x_darwin_arm64`      |
 
 > **问:** 如何确定我的操作系统架构？
+> 
 > **答:** 执行相应命令查看：
 >
 > - Linux/macOS: `arch` 或 `uname -m`
