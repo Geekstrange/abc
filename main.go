@@ -22,6 +22,8 @@ var (
 	dragStartX, dragStartY    int
 	isDragging                bool
 	customKeys                map[string]string // 存储自定义键绑定 c1->keycode
+	isRealtimeMode            bool = true       // 实时移动模式标志
+	moveSpeed                 int = 3           // 移动速度 (1-5)
 )
 
 // 初始化自定义键映射
@@ -181,10 +183,12 @@ func displayOperationUI() {
 	fmt.Println("Ctrl+I: 切换到输入模式 | Ctrl+C: 退出")
 	fmt.Println("-----------------------------------")
 	fmt.Println("方向键: 移动指针 | Enter: 点击")
-	fmt.Println("空格: 开始/结束拖动 | ESC: 取消拖动")
+	fmt.Println("空格: 开始/结束拖动 (同时切换模式) | ESC: 取消拖动")
 	fmt.Println("p:电源 | +:音量加 | -:音量减 | h:Home | b:返回 | m:菜单")
 	fmt.Println("c1-c9: 自定义键(按对应键触发) | C1-C9: 录制自定义键")
 	fmt.Println("-----------------------------------")
+	fmt.Printf("移动模式: [%s] | 速度: %d/5 (步长:%dpx) ([/]调整速度)\n",
+		map[bool]string{true: "实时移动", false: "步进移动"}[isRealtimeMode], moveSpeed, moveStep)
 	displayPointerArea()
 	fmt.Printf("\n当前位置: (%d, %d)\n", currentX, currentY)
 	if len(customKeys) > 0 {
@@ -226,7 +230,19 @@ func displayPointerArea() {
 		fillChar = "·" // Unicode U+00B7 减少纵向拉伸感
 	}
 
-	fmt.Printf("屏幕预览 (手机 %d:%d, 字符宽高比 %.1f)\n",
+	// 网格字符设置
+	gridChar := "·"
+	if os.Getenv("TERM_GRID_CHAR") != "" {
+		gridChar = os.Getenv("TERM_GRID_CHAR")
+	}
+	gridInterval := 5
+	if envInterval := os.Getenv("TERM_GRID_INTERVAL"); envInterval != "" {
+		if i, err := strconv.Atoi(envInterval); err == nil && i > 0 {
+			gridInterval = i
+		}
+	}
+
+	fmt.Printf("屏幕预览 (手机 %dx%d, 字符宽高比 %.1f)\n",
 		phoneW, phoneH, charAspect)
 	fmt.Print("+")
 	fmt.Print(strings.Repeat("-", boxWidth))
@@ -238,7 +254,12 @@ func displayPointerArea() {
 			if x == gx && y == gy {
 				fmt.Print(pointerChar)
 			} else {
-				fmt.Print(fillChar)
+				// 添加网格辅助线
+				if x%gridInterval == 0 && y%gridInterval == 0 {
+					fmt.Print(gridChar)
+				} else {
+					fmt.Print(fillChar)
+				}
 			}
 		}
 		fmt.Println("|")
@@ -342,6 +363,23 @@ func listenForKeyPress() (string, string, error) {
 // 操作模式
 func operationMode() error {
 	displayOperationUI()
+
+	// 实时移动状态变量
+	var (
+		lastMoveTime time.Time
+		moveDelay    time.Duration
+		originalMode bool // 用于保存拖动前的模式
+	)
+
+	// 计算移动延迟
+	calculateMoveDelay := func() {
+		// 速度越快, 延迟越短 (100ms - 20ms)
+		moveDelay = time.Duration(120-(moveSpeed*20)) * time.Millisecond
+	}
+
+	// 初始计算
+	calculateMoveDelay()
+
 	for {
 		char, key, err := keyboard.GetKey()
 		if err != nil {
@@ -356,17 +394,41 @@ func operationMode() error {
 
 		switch key {
 		case keyboard.KeyArrowUp:
-			currentY = max(0, currentY-moveStep)
-			displayOperationUI()
+			if isRealtimeMode && time.Since(lastMoveTime) > moveDelay {
+				currentY = max(0, currentY-moveStep)
+				lastMoveTime = time.Now()
+				displayOperationUI()
+			} else if !isRealtimeMode {
+				currentY = max(0, currentY-moveStep)
+				displayOperationUI()
+			}
 		case keyboard.KeyArrowDown:
-			currentY = min(screenHeight, currentY+moveStep)
-			displayOperationUI()
+			if isRealtimeMode && time.Since(lastMoveTime) > moveDelay {
+				currentY = min(screenHeight, currentY+moveStep)
+				lastMoveTime = time.Now()
+				displayOperationUI()
+			} else if !isRealtimeMode {
+				currentY = min(screenHeight, currentY+moveStep)
+				displayOperationUI()
+			}
 		case keyboard.KeyArrowLeft:
-			currentX = max(0, currentX-moveStep)
-			displayOperationUI()
+			if isRealtimeMode && time.Since(lastMoveTime) > moveDelay {
+				currentX = max(0, currentX-moveStep)
+				lastMoveTime = time.Now()
+				displayOperationUI()
+			} else if !isRealtimeMode {
+				currentX = max(0, currentX-moveStep)
+				displayOperationUI()
+			}
 		case keyboard.KeyArrowRight:
-			currentX = min(screenWidth, currentX+moveStep)
-			displayOperationUI()
+			if isRealtimeMode && time.Since(lastMoveTime) > moveDelay {
+				currentX = min(screenWidth, currentX+moveStep)
+				lastMoveTime = time.Now()
+				displayOperationUI()
+			} else if !isRealtimeMode {
+				currentX = min(screenWidth, currentX+moveStep)
+				displayOperationUI()
+			}
 		case keyboard.KeyEnter:
 			if !isDragging {
 				fmt.Println("\n执行点击...")
@@ -380,9 +442,17 @@ func operationMode() error {
 			}
 		case keyboard.KeySpace:
 			if !isDragging {
+				// 保存当前模式
+				originalMode = isRealtimeMode
+				// 切换移动模式
+				isRealtimeMode = !isRealtimeMode
+				fmt.Printf("\n开始拖动 - 移动模式切换为: %s\n",
+					map[bool]string{true: "实时移动", false: "步进移动"}[isRealtimeMode])
+
+				// 开始拖动
 				dragStartX, dragStartY = currentX, currentY
 				isDragging = true
-				fmt.Println("\n开始拖动 (移动指针后按空格结束拖动, ESC取消)")
+				fmt.Println("移动指针后按空格结束拖动, ESC取消")
 				displayOperationUI()
 			} else {
 				fmt.Println("\n结束拖动...")
@@ -391,13 +461,20 @@ func operationMode() error {
 				} else {
 					fmt.Println("拖动成功")
 				}
+				// 恢复原始模式
+				isRealtimeMode = originalMode
+				fmt.Printf("移动模式恢复为: %s\n",
+					map[bool]string{true: "实时移动", false: "步进移动"}[isRealtimeMode])
+
 				isDragging = false
 				time.Sleep(300 * time.Millisecond)
 				displayOperationUI()
 			}
 		case keyboard.KeyEsc:
 			if isDragging {
-				fmt.Println("\n已取消拖动")
+				// 取消拖动时也恢复原始模式
+				isRealtimeMode = originalMode
+				fmt.Println("\n已取消拖动 - 模式已恢复")
 				isDragging = false
 				time.Sleep(300 * time.Millisecond)
 				displayOperationUI()
@@ -447,7 +524,7 @@ func operationMode() error {
 			}
 			time.Sleep(1000 * time.Millisecond)
 			displayOperationUI()
-		} else {
+		} else if char != 0 {
 			switch char {
 			case 'p':
 				fmt.Println("\n模拟电源键...")
@@ -479,7 +556,24 @@ func operationMode() error {
 				pressKey("82")
 				time.Sleep(300 * time.Millisecond)
 				displayOperationUI()
-			// 处理自定义键触发 (小写字母表示触发)
+			case '/': // 降低移动速度
+				if moveSpeed > 1 {
+					moveSpeed--
+					moveStep = moveSpeed * 5 // 步长与速度关联
+					calculateMoveDelay()
+					fmt.Printf("\n移动速度降低: %d/5 (步长:%dpx)\n", moveSpeed, moveStep)
+					time.Sleep(300 * time.Millisecond)
+					displayOperationUI()
+				}
+			case '*': // 提高移动速度 (Shift+8)
+				if moveSpeed < 5 {
+					moveSpeed++
+					moveStep = moveSpeed * 5 // 步长与速度关联
+					calculateMoveDelay()
+					fmt.Printf("\n移动速度提高: %d/5 (步长:%dpx)\n", moveSpeed, moveStep)
+					time.Sleep(300 * time.Millisecond)
+					displayOperationUI()
+				}
 			case 'c':
 				// 等待输入数字1-9
 				fmt.Print("\n请输入要触发的编号(1-9): ")
@@ -599,7 +693,7 @@ func main() {
 	}
 	defer keyboard.Close()
 
-	fmt.Println("ADB Basic Contorller")
+	fmt.Println("ADB Basic Controller")
 	fmt.Println("Ctrl+O: 进入操作模式")
 	fmt.Println("Ctrl+I: 进入输入模式")
 	fmt.Println("Ctrl+C: 退出程序")
