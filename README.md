@@ -85,10 +85,9 @@ ABC (ADB Basic Controller) 是一款轻量级的 Android 设备命令行控制�
 >
 >> - Linux/macOS: `arch` 或 `uname -m`
 >> - Windows: 在 PowerShell 中执行 `[Environment]::Is64BitOperatingSystem` 查看是否为 64 位系统，通过设备管理器查看处理器架构
->
-> > x86_64/amd64 → AMD64 架构
-> > aarch64/arm64 → ARM64 架构
-> > loong64 → 龙芯 64 位架构
+>> x86_64/amd64 → AMD64 架构
+>> aarch64/arm64 → ARM64 架构
+>> loong64 → 龙芯 64 位架构
 
 ## 许可证
 
